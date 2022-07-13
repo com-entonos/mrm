@@ -1,0 +1,731 @@
+this file documents the input to 'mrm' (micromagnetic recording mode) which is a micromagnetics code for hard disk drive write simulations.
+
+COMPILING:
+
+  need to compile/install fftw and plplot first.
+  once fftw/plplot compiled/installed, you can now build mrm (make help might be useful)
+
+INPUT FILES:
+
+  there are two main input files for mrm: som.inp and a command line file (usually called som.cli, but can be changed in som.inp). when executing mrm, one can 
+  override these defaults by supplying arguments (first argument is the new file for som.inp and second is for som.cli).
+  the command line file is automatically generated if a loop namelist is present in som.inp
+  in additional, there may be one or more write field files and one or more temperature profiles.
+
+ som.inp:
+  som.inp (or equivalent) must exist in the directory that mrm is executed from or first argument to mrm is fully resolved path
+
+  som.inp (or equivalent) consists of the following namelists:
+   (none are mandatory, but obviously some have bad defaults! the defaults are listed here. if a variable does not appear in the namelist file, it takes on it's default value.) if a variable occurs more than once, the last assignment is what take precedence. a '!' means that line is a comment and is not read. some versions of fortran don't understand characters in the first column, so keep that column as whitespace.
+
+  control  - sets some basic control parameters
+   cli_file        =' '            !cli file name {'som.cli' if input generated automatically}. if '-' then read from standard input cli commands
+   screen_file     ='scrn.out'     !screen file name 
+   loop_file       ='h.dat'        !file name of mh loop data
+   save_screen_p   =.false.        !save screen prints to screen_file? 
+   append_screen_p =.false.        !append to screen_file?
+   oldmag_read_p   =.false.        !read media.f magnetization files? [not used]
+   oldmag_write_p  =.false.        !write media.f magnetization files? [not used]
+   oldgrain_read_p =.false.        !read media.f grain files? [not used]
+   oldgrain_write_p=.false.        !write media.f grain files? (not recommended) [not used]
+   win_close_p     =.false.        !for windows platforms, should we close windows after finishing? (not supported yet- windows stay open!) [not used]
+
+  grid     - sets the simulation grid and dimensions
+   nx  =1                          !number of sub-grains along x direction
+   ny  =1                          !number of sub-grains along y direction
+   dx  =0.d0                       !size of sub-grains along x (cm)
+   dy  =0.d0                       !size of sub-grains along y (cm)
+   dz  =0.d0                       !media thickness (cm)
+   nxfft = nx			   !number of sub-grains along x direction for fft windowing
+   nxyft = ny			   !number of sub-grains along y direction for fft windowing
+   offset_xfft = 0.d0		   !x offset of center of fftw window to main simulation center (cm)
+   offset_yfft = 0.d0		   !y offset of center of fftw window to main simulation center (cm)
+   fft_selfdemag_p=.false.	   !outside of fft window, should we compute the selfdemag field?
+
+
+  demag    - parameters needed for magnetostatic calculation
+   interlayer_space=0.d0           !space between top of SUL and bottom of hard layer (cm)
+   sul_mu          =1.d0           !relative dc permeability of SUL
+   fly_height      =0.d0           !space between top of hard layer and bottom of head (cm) [not used]
+   head_mu         =1.d0           !relative dc permeability of head [not used]
+   num_images      =2              !number of image pairs if both SUL and head of permeability > 1 [not used]
+   self_fld_only_p =.false.        !only have self-magnetostatic fields (approximate for grains) [not used]
+   demag_file      ='mrm_N.dat'    !file name to store/read magnetostatic tensor
+   compute_tensor_only_p = .false. !only compute magnetostatic tensor and quit?
+   compute_tensor_layer = 0        ! if compute_tensor_only_p=.true. then compute only this layer and quit. if 0, then all layers [not used]
+   compute_tensor_layer_obs = 0    ! if compute_tensor_only_p=.true. and compute_tensor_layer valid layer # then 
+                                   !    compute only this compute_tensor_layer on compute_tensor_layer_obs and quit. if 0, then all layers [not used]
+   demag_p         =.true.         !should demag field be calculated during LLG push?
+
+  media    - parameters describing the hard layer
+   ms                =800.d0 or last set      !nominal Ms of hard layer (T=0K value if Ms scaling is being used)
+   k_ang             =0.d0 or last set        !parameter for angular dispersion for Hk (degrees)
+   kx                =0.d0 or last set        !x direction of nominal Hk direction
+   ky                =0.d0 or last set        !y direction of nominal Hk direction
+   kz                =0.d0 or last set        !z direction of nominal Hk direction
+                                              !if after input kx^2+ky^2+kz^2=0, then kz will be set to 1.d0
+   hk_3d_random_p    =.false. or last set     !HK should be random on a sphere?
+   hk_2d_random_p    =.false. or last set     !Hk should be random in 2d perpendicular to vector (kx, ky, kz)?
+   hk_uniform_p      =.false. or last set     !Hk should be uniformly distributed between 0 and k_ang?
+                                              !default is that Hk angular distribution should be Gaussian on a sphere
+   hk_cone_p         =.false. or last set     !Hk is a cone around (kx,ky,kz) at nominal angle k_ang w/ gaussian spread k_cone_sigma
+   hk_cone_sigma     =0.d0 or last set        !gaussian spread for Hk cone distribution (degrees)
+   k_sigma           =0.d0 or last set        !ln-normal sigma for Hk magnitude
+   hk                =0.d0 or last set        !Hk magnitude (first term) (Oe)
+   hk2               =0.d0 or last set        !Hk magnitude (second term) (Oe) 
+   hx                =0.d0 or last set        !nominal intergrainular exchange an average grain will feel in dc neighborhood (Oe)
+   hx_sigma          =0.d0 or last set        !explicit ln-normal dispersion of intergrain exchange coupling
+   packing_fraction  =1.d0 or last set        !packing fraction (decimal, otherwise a percent if > 1)
+   vol_sigma         =0.d0 or last set        !target ln-normal sigma for grain volume
+   dr_grain          =0.5d0 or last set       !rate of grain growth (sub-grain/iteration)
+   average_grain_area=0.d0 or last set        !desired grain area (<0 or 1.d0 or dx*dy, then grains are subgrains
+                                              !                   (<1.d0, then (cm^2)
+                                              !                   (otherwise in terms of sub-grains^2)
+   rand_seed         =34*layer #              !random number seed for grains
+   initial_grain_area=0.d0 or last set        !used instead of volume_sigma (if > 0 and < 1, in (cm^2) otherwise in sub-grain^2)
+   mx                =0.d0 or last set        !nominal initial direction of x component of magnetization
+   my                =0.d0 or last set        !nominal initial direction of y component of magnetization
+   mz                =1.d0 or last set        !nominal initial direction of z component of magnetization
+   ac_p              =.false. or last set     !should sample be AC erased?
+   saturate_p        =.false. or last set     !should we initialize along (mx,my,mz) instead of the easy axis closest to it?
+   old_exch_p        =.false. or last set     !exchange between grain varied by one random number?  otherwise each face coupling is varied
+                                              ! if .true. then it's same as media.f- i.e. each exchange coupling between faces is varied
+					      ! affects both intralayer and interlayer (this layer and the one above) [not used]
+   tc		     =-1.d0 		      !Tc value (K), values less than 0 mean infinite Tc value
+   tc_sigma          =0d0 or last set         !in HAMR simulation, variance of Curie temperature, sigma(Tc)/Tc (dimensionless).
+					      !  this is standard deviation of a guassian variation of Tc
+   tc_d0	     =0.9d0                   !size of small grain diameter for Tc variation due to grain size
+   tc_eta	     =0.d0		      !dimensionless exponent for Tc variation with grain size
+   					      ! scaling goes as Tc_grain = Tc (1-(D/tc_d0)**(-1/eta)). if eta=0, no scaling is done
+   tc_max	     =1.d40		      !maximum value of Tc for any grain (K)
+   tc_rescale_p      =.true.		      !rescale Tc distribution so volume average Tc is equal to tc
+   dz                 =dz from grind or last set ! thickness of this layer (cm)
+   ex                 =0.d0 or last set       !intralayer exchange grain coupling (erg/cm^2)
+   ex_sigma           =hx_sigma or last set   !ln-normal sigma for intralayer exchange grain coupling
+   ex_upper           =0.d0                   !interlayer exchange grain coupling between this layer and layer above (erg/cm^2)
+                                              !   if this is the first layer, this variable is ignored
+   ex_upper_sigma     =0.d0                   !ln-normal sigma interlayer exchange grain coupling between this layer and layer above
+                                              !   if this is the first layer, this variable is ignored
+   same_grain_p       =.false.                !same grain geometry as layer above
+   same_hk_p          =.false.                !same Hk distibution (magnitude and above) as layer above (only makes sense if same_grain_p=.true.)
+   same_exchange_p    =.false.                !same exchange distibution as layer above (only makes sense if same_grain_p=.true.)
+   same_init_mag_p    =.false.                !same initial magnetization as layer above
+   space_to_upper     =0.d0                   !space between the top of this layer and the bottom of the layer above (cm)
+                                              !   if this is the first layer, this variable is ignored
+   loop_file           =loop_file from control or last set !file name of mh loop data
+
+  NOTE:
+    the first media namelist in som.inp is the top most layer (closest to the write head if present) and is referred to as L1 in command line keywords
+    the second media namelist (if present) in som.inp is the layer just below the top layer and is referred to as L2 in command line keywords
+    the third media namelist (if present) in som.inp is the layer just below the second layer and is referred to as L3 in command line keywords
+      ...
+    the last media namelist (which can also be the first/only) in som.inp is the layer bottom most layer (closest to the SUL if present)
+    'or last set' means if this variable was explicitly set in a previous layer, its value will not change for subsequent layers unless explicitly reset
+
+  llg       - parameters needed for integrating LLG
+   alpha       =1.d0 or last set              !Gilbert damping parameter
+   gamma       =1.76d7 or last set            !gyromagnetic ration (rad/Oe/s)
+   dt          =.1d-13 or last set            !(initial) LLG time step (s)   **note: dt appliies to all layers
+   thermal_p   =.false. or last set           !stochastic thermal fields?
+   thermal_seed=34 or last set                !random seed for stochastic fields?
+   max_dm      =180.d0 or last set            !maximum allowed magnetization rotation in a time step (degree)
+   min_dm      =0.d0 or last set              !minimum allowed magnetization rotation in a time step (degree)
+   dt_frac     =0.2d0 or last set             !fraction of gyroperiod to estimate LLG timestep  **note: dt_frac appliies to all layers
+   dt_max      =1.d22 or last set             !maximum allowed LLG time step (s)  **note: dt_max appliies to all layers
+   t_max       =1.d22 or last set             !simulation time to integrate LLG to (s)  **note: t_max appliies to all layers
+   t_min       =-1.d22 or last set            !must integrate LLG to at least this simulation time (s)  **note: t_min appliies to all layers
+   del_t       =1.d22 or last set             !maximum time to integrate LLG (s)  **note: del_t appliies to all layers
+   conv_torque =5.d-3 or last set             !convergence criteria for |mxH|/Ms
+   conv_angle  =0.d0 or last set              !convergence criteria for magnetization rotation (degree)
+   temperature =293.15d0 or last set          !temperature (K) 
+   fixed_dt_p  =.false. or last set           !LLG time step is fixed?  **note: fixed_dt_p appliies to all layers
+   iter        =100 or last set               !print to screen between this many iterations in LLG  **note: iter appliies to all layers
+   min_ave_m   =-1.d22*(/ 1.d0, 1.d0, 1.d0 /) or last set!convergence criteria on minimum average normalized magnetization
+   max_ave_m   = 1.d22*(/ 1.d0, 1.d0, 1.d0 /) or last set!convergence criteria on maximum average normalized magnetization
+   plot_iter   =-1 or last set                !plot magnetization/write field between this many iterations in LLG (<1 means plot_iter=iter)  **note: plot_iter appliies to all layers
+   thermal_num_ave = 5001 or last set         !maximum number of time steps to average max torque for convergence w/ stochastic fields  **note: thermal_num_ave appliies to all layers
+   new_integrator  = .true. or last set       !use LLG integrator, or just LL (from media.f)?
+   media_layer =0                             !layer# to set these LLG parameters, if 0 all layers get these values
+
+  NOTE:
+    variables dt,dt_frac, dt_max, t_max, t_min, del_t, fixed_dt_p, iter, plot_iter and thermal_num_ave are only applied to all layers. 
+    therefore only the last assignment has any effect
+    'or last set' means if this variable was explicitly set in a previous layer, its value will not change for subsequent layers unless explicitly reset
+
+  plot     - control plotting graphics
+   plot_p       =.false. or last set          !turn on graphics?
+   plot_hk_p    =.true. or last set           !plot Hk histograms?
+   plot_grain_p =.true. or last set           !plot grain area histogram?
+   plot_fld_p   =.true. or last set           !plot (perpendicular) write field contour? 
+   plot_hx_p    =.true. or last set           !plot intralayer exchange histogram, scatter and contour?
+   plot_hx_il_p =.true. or last set           !plot interlayer exchange histogram, scatter and contour?
+   plot_mag_p   =.true. or last set           !plot magnetization projected along nominal Hk direction?
+   num_level_mag= -6 or last set              !number of contour levels for m.k plot (-6 is the old media.f default)
+   plot_mh_p    =.true. or last set           !plot/print m(h)?
+   plot_heff_p  =.false. or last set          !plot SW effective field contour?
+   plot_signed_heff_p= .false. or last set    !plot SW field, with sign taken from perpendicular component?
+   plot_temp_p  =.false. or last set          !plot temperature contour? if .true., then turns on Ms(T) contour also
+   plot_hscale_p=.true. or last set           !plot write field scaling vs. time?
+   plot_hamr_scales_p=.false. or last set     !plot Ms,Hk,alpha,gamma vs temperature ?
+   media_layer =0                             !layer# to set these plot parameters, if 0 all layers get these values
+
+  pattern  - place pre-existing bit patterns on disk
+   xmin =-1.d22                    !minimum x position of this region (cm)
+   xmax =1.d22                     !maximum x position of this region (cm)
+   ymin =-1.d22                    !minimum y position of this region (cm)
+   ymax =1.d22                     !maximum y position of this region (cm)
+   mx   =0.d0                      !nominal x component of magnetization
+   my   =0.d0                      !nominal y component of magnetization
+   mz   =1.d0                      !nominal initial direction of z component of magnetization
+   ac_p =.false.                   !AC erased? 
+   saturate_p =.false.             !should we initialize along (mx,my,mz) instead of the easy axis closest to it?
+   media_layer =0                  !layer# to set these LLG parameters, if 0 all layers get these values
+
+  checker  - place a checker board pattern on disk
+  ! NOT IMPLEMENTED
+   mx     =0.d0                    !nominal x component of magnetization
+   my     =0.d0                    !nominal y component of magnetization
+   mz     =0.d0                    !nominal z component of magnetization
+   dx     =.5d0*dx*nx              !size along x of one checker (1/2 the simulation area) (cm)
+   dy     =.5d0*dy*ny              !size along y of one checker (1/2 the simulation area) (cm)
+   xcenter=1.d22                   !center position of one checker along x (cm)
+   ycenter=1.d22                   !center position of one checker along y (cm)
+
+  loop     - do we want to do a m(h) loop?
+   write_grain_p=.true.            !write grain file?
+   write_m_p    =.false.           !write magnetization file?
+   grain_file   ='grainloop.dat'   !name of grain file
+   m_file       ='magloop.dat'     !name of magnetization file
+   hx=0.d0; hy=0.d0; hz=0.d0       !uniform applied field direction (normalized field)
+   hmin         =0.d0              !minimum applied field magnitude (Oe)
+   hmax         =0.d0              !maximum applied field magnitude (Oe)
+   dh           =0.d0              !field step (Oe)- sign determines the initial field sweep direction
+   hmin_fine    =1.d22             !minimum applied field amplitude using dh_file field steps (Oe)
+   hmax_fine    =1.d22             !minimum applied field amplitude using dh_file field steps (Oe)
+   dh_fine      =0.d0              !field step (Oe)
+   h_start      =1.d22             !starting field for 'loop'
+   loop_p       =.false.           !want a full loop?
+   continous_p  =.false.           !change the field continuously during LLG integration?
+   dt_max       = del_t            !maximum time in LLG between field steps when stepping w/ dh (s) {default via som.inp's `llg` namelist}
+   dt_max_fine  = del_t            !maximum time in LLG between field steps when stepping w/ dh_fine (s) {default via som.inp's `llg` namelist}
+
+
+ command line file (usually som.cli):
+  if loop namelist is present in som.inp, then a command line file will be
+  generated automatically. otherwise such a file must be placed in the working directory.
+
+  this file is an ascii file.
+  lines w/ the first non-space character of ! are ignored
+  otherwise the line is read (up to 200 characters) and is parsed into tokens. tokens are defined to be separated by one or more spaces,
+  unless a single quote (') or double quote(") is read. then the token will be all characters between the first and last quote and any 
+  non-space characters after the second quote.
+
+  tokens are case insensitive, except for file names which are case sensitive.
+
+  once the line is is broken up into tokens, all the tokens except the first are scanned
+    if the token is equal to 'ALL' (and the first token is not 'PLOT') then the command will apply to all layers if applicable
+    if the token starts with an 'L', the rest of the token is converted into an integer and the command will apply only to this specified layer if applicable
+    either of these tokens are taken out of the token chain
+    if neither appear, 'ALL' is assumed
+
+  extra tokens are ignored.
+
+  there is NOT robust error checking. e.g. if a number is expected, that token will be converted into a number regardless if it's actually a number or not.
+
+  tokens which are numbers can be either integers or reals (single or double precision) w/ decimal points, leading signs and/or exponential notation. any unknown characters in a number is simply ignored.
+
+  the following are a list of valid keywords in the command line file. any part that are between [ ] is optional.
+
+  keywords for opening, reading/writing comments and closing files:
+
+    OPENR- open a file to read
+      second token is the name of the file
+      optional token FORMATTED or UNFORMATTED (FORMATTED is default)
+    OPENW- open a file to write
+      second token is the name of the file
+      optional token FORMATTED or UNFORMATTED (FORMATTED is default)
+      optional token REWIND or APPEND (REWIND is default)
+    CLOSE- close a file
+      second token is the name of the file
+      optional token of KEEP or DELETE (KEEP is default)
+    READ_C[OMMENT]- read a line from a file
+      second token is the name of the file
+    WRITE_C[OMMENT]- write a line from a file
+      second token is the name of the file
+      all other tokens are written to one line
+
+  keywords for dealing w/ write fields
+** for information on placement of write fields on the simulation grid, see 1) below
+** for information on default behaviour when fields are read in, see 2) below
+
+    READ_F[IELD]- read a write field
+      second token is the name of the file
+      third token is the field index
+      optional token is field scaling factor applied at read (1 is default)
+    CREATE_F[IELD] - creates an uniform field
+      second token is the field index
+      third, forth and fifth token are the field components: hx, hy, hz (Oe)
+    SET_1F[IELD] - set 1 field for LLG 
+      two ways to call:
+        field index, scale - this is a time invariant field w/ optional scale  (1.0 is default) OR
+        field index, starting time, ending time, starting scale, ending scale,  scale
+           scale is optional (1.0 is default)
+	field index, [SIN|COS|EXP], omega, phase, amplitude, dc offset, scale: (offset + amplutide * func(omega*t+phase)) * scale
+        in any case one can also specify the layer this SET_1FIELD applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_2F[IELD] - set 2 fields for LLG 
+      three ways to call:
+        field index1, field index2, scale - these are time invariant fields w/ optional scale  (1.0 is default) OR
+        field index1, field index2, starting time, ending time, starting scale1, ending scale1, scale
+           scale is optional (1.0 is default) and the other parameters are for the first field
+        field index1, field index2, starting time, ending time, starting scale1, ending scale1, starting scale2, ending scale2, scale
+           scale is optional (1.0 is default)
+	field index1, field index2, [SIN|COS|EXP], omega, phase, amplitude, dc offset, scale: amplutide * func(omega*t+phase) * scale
+	field index1, field index2, [SIN|COS|EXP], omega1, phase1, amplitude1, dc1, [SIN|COS|EXP], omega2, phase2, amplitude2, dc2, scale
+        in any case one can also specify the layer this SET_1FIELD applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    FLD_V[ELOCITY] - set a write field velocity
+      second token is field index
+      third and fourth token are the velocities along x and y (cm/s)
+      optional fourth is 'ADD' which adds the value to the current value
+    FLD_O[FFSET] - set a write field offset points
+      second token is field index
+      third and fourth token are the offsets along x and y (cm)
+      optional fourth is 'ADD' which adds the value to the current value
+    FLD_R[EF] - set a write field reference points
+      second token is field index
+      third and fourth token are the reference along x and y (cm)
+      optional fourth is 'ADD' which adds the value to the current value
+    FLD_D[UPLICATE] - duplicate a write field
+      second token is source field index
+      third token is the copy field index
+    FLD_T[ORIGIN] - set field time origin 
+      second token is source field index
+      third toke is the time origin (s)
+      optional fourth is 'ADD' which adds the value to the current value
+
+  keywords dealing w/ HAMR:
+
+    CREATE_T[EMP] - create a super-gaussian temperature profile
+      second token is temperature index
+      third token is the peak change in temperature: dT (K)
+      fourth and fifth token is simga_x and sigm_y for supergaussian (cm)
+      sixth token is the exponetial for super gaussian: 1 for gaussian, 2 for exp( -(...)^4), n for exp( -(...)^2n)
+      the profile is made on a virtual mesh and on that mesh:
+        dT(x,y) = dT exp( - { (x/sigma_x)^(2n) + (y/sigma_y)^(2n) } )
+      and offset_x/offset_y is set to half the simulation size by default (unless this index was used previously)
+    READ_T[EMP] - read change in temperature profile (K)
+      second token is the file name
+      optional token is profile scaling factor applied at read (1 is default)
+      format of the data file is:
+        <any number of lines starting w/ !, # or ">
+	starting y (say, down track) index
+	ending y (say, down track) index
+	starting x (say, cross track) index
+	ending x (say cross track) index
+        <any number of lines starting w/ !, # or ">
+	y_1 (in nm)
+	y_2
+	 .
+	 .
+	 .
+	y_ny
+        <any number of lines starting w/ !, # or ">
+	x_1 (in nm)
+	x_2
+	 .
+	 .
+	 .
+	x_nx
+        <any number of lines starting w/ !, # or ">
+	dT(x_1, y_1) (in K or C)
+	dT(x_2, y_1)
+	 .
+	 .
+	 .
+	dT(x_nx,y_1)
+	dT(x_1, y_2)
+	dT(x_2, y_2)
+	 .
+	 .
+	 .
+	dT(x_nx,y_ny)
+      x & y positions are rescaled to be in cm after input
+    READ_S[CALE] - read scaling table for Ms, alpha, Hk and/or gamma
+      second token is the name of the file
+      third token is either: M[S], A[LPHA], H[K] or G[AMMA] (otherwise not read)
+      one can also specify the layer this scaling  applies to (e.g. L1 for first layer) or ALL (default is ALL)
+      format of the data file is:
+        <any number of lines starting w/ !, # or ">
+	number of entries in table
+        <any number of lines starting w/ !, # or ">
+	T_1      scaling factor_1
+	 .        .
+	 .        .
+	 .        .
+	T_n      scaling factor_n
+       write T is in K and scaling factor is normalized to T=0K value. e.g. Ms(T)/Ms(T=0K)
+       if a grain's temperature is out-of-range, then if T<T_1, scaling_factor_1 is used, otherwise
+       if T>T_n then scaling factor_n is used.
+    SET_TE[MP] - set temperature index to use
+      second token is temperature index
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_1TEMP - set temperature index and linear time dependence
+      two ways to call:
+        temp_index, scale - this is a time invariant field w/ optional scale  (1.0 is default) OR
+        temp_index, starting_time, ending_time, starting_scale, ending_scale,  scale
+           scale is optional (1.0 is default)
+	temp_index, [SIN|COS|EXP], omega, phase, amplitude, dc offset, scale: (offset + amplutide * func(omega*t+phase)) * scale
+	temp_index, STEP, period, delta t, amplitude, dc offset, ramp time, scale: (offset + amplutide * func(omega*t+phase)) * scale
+	temp_index, NEWTON, period, delta t, max dT, dc offset, decay time, duty cycle, modulation depth (0:1) scale
+        in either case one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_2TEMP - set 2 temperatures for LLG 
+      three ways to call:
+        temp index1, temp index2, scale - these are time invariant fields w/ optional scale  (1.0 is default) OR
+        temp index1, temp index2, starting time, ending time, starting scale1, ending scale1, scale
+           scale is optional (1.0 is default) and the other parameters are for the first field
+        temp index1, temp index2, starting time, ending time, starting scale1, ending scale1, starting scale2, ending scale2, scale
+           scale is optional (1.0 is default)
+	temp_index1, temp index2, [SIN|COS|EXP], omega, phase, amplitude, dc offset, scale: amplutide * func(omega*t+phase) * scale
+	temp_index1, temp index2, [SIN|COS|EXP], omega1, phase1, amplitude1, dc1, [SIN|COS|EXP], omega2, phase2, amplitude2, dc2, scale
+        in any case one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    TEMP_V[ELOCITY] - set temperature profile velocity
+      second token is field index
+      third and fourth token are the velocities along x and y (cm/s)
+      optional fourth is 'ADD' which adds the value to the current value
+    TEMP_O[FFSET] - set temperature profile offset points
+      second token is field index
+      third and fourth token are the offsets along x and y (cm)
+      optional fourth is 'ADD' which adds the value to the current value
+    TEMP_R[EF] - set temperature profile reference points
+      second token is field index
+      third and fourth token are the reference along x and y (cm)
+      optional fourth is 'ADD' which adds the value to the current value
+    TEMP_D[UPLICATE] - duplicate temperature profile
+      second token is source field index
+      third token is the copy field index
+    TEMP_T[ORIGIN] - set temperature profile time origin 
+      second token is source field index
+      third toke is the time origin (s)
+      optional fourth is 'ADD' which adds the value to the current value
+
+  keywords for dealing w/ grain microstructure:
+
+    WRITE_G[RAIN]- write the media microstructure to a file
+      second token is the name of the file
+      optional token can have either OLD or NEW for format of file (default is set in som.inp's `control` namelist)
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    READ_G[RAIN]- read a media microstructure
+      second token is the name of the file
+      optional token OLD or NEW for format of the file (default is from som.inp's `control` namelist)
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    GEN_AR[EA] - generate grains & exchange (this is done automatically w/ GEN_GRAIN)
+    GEN_HK - generate grain HK distributions (this is done automatically w/ GEN_GRAIN)
+    GEN_G[RAIN] - generate grains (grains themselves and Hk distributions)
+    READ_D[ISTRIBUTION] - read user define probability distribution
+      second token is the name of the file to read
+      third token is which distribution to read:
+         K - |Hk| magnitude distribution; if k2 is specified then also gives the distribution of k2 by scaling the k1 axis by som.inp's hk2/hk
+	 E[XCHANGE] - exchange magnitude distribution (either between grains or faces); still normalized by som.inp's hx
+	 A[NGLE] - polar angle distribution of Hk; this gives the polar angle distribution about the som.inp's nominal k(=kx,ky,kz) vector
+	 P[HI] - azimuthal angle distribution of Hk around k (not recommended- since phi is typically not well defined for all cases)
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+      format of the data file is:
+        <any number of lines starting w/ !, # or ">
+	number of entries in table
+        <any number of lines starting w/ !, # or ">
+	IV_1      probability_1
+	 .         .
+	 .         .
+	 .         .
+	IV_n      probability_n
+       where IV is the indepedent varaible values (for angles in degrees; for K in Oe; for exchange arbitrary) and probability is it's probability
+       if a user defined distribution is defined, then it will used regardless of what is specified in som.inp
+    DESTR[OY_DISTRIBUTION] - destroy previously defined user defined probability distribution
+      second toke is which distribution to destroy:
+         K - |Hk| magnitude distribution
+	 E[XCHANGE] - exchange magnitude distribution
+	 A[NGLE] - polar angle distribution of Hk
+	 P[HI] - azimuthal angle distribution of Hk
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_HKS[IGMA] - set ln-normal sigma for Hk magnitude; doesn't take effect until GEN_GRAIN or GEN_HK
+      second token is sigma value
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_HK - set average Hk field(s)
+      second token is average HK1 (Oe)
+      third optional token is average HK2 (Oe)
+      third/fourth optional token is SCA[LE] which, if present, scales the current Hk immediately
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_MS - set saturation magnetization
+      second token is value of Ms (emu/cc)- effect is immediate
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_EX[CHANGE] - set new or old type of exchange; doesn't take effect until GEN_GRAIN or GEN_AREA
+      second token is
+         N[EW] - distribution between grain pairs
+         O[LD] - distribution on faces
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_HX - set average exchange field for average grain in a opposite dc neighborhood
+      second token is average Hx (Oe)
+      third optional token is SCA[LE] which, if present, scales the current exchange immediately
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_HXS[IGMA] - set ln-normal sigma for exchange coupling between grains or faces; doesn't take effect until GEN_GRAIN or GEN_AREA
+      second token is sigma value
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_TC_SIGMA - set Curie temperature std deviation; doesn't take effect until GEN_GRAIN
+      second token is dimensionless sigma(Tc)/mean(Tc)
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+
+  keywords for dealing w/ magnetization:
+
+    WRITE_M[AG]- write the magnetization configuration to a file
+      second token is the name of the file
+      optional token can have either OLD or NEW for format of file (default is set in som.inp's `control` namelist)
+      optional additional integer token for the 'transition  number' if OLD is specified
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    READ_M[AG]- read a magnetization configuration
+      second token is the name of the file
+      optional token OLD or NEW for format of the file (default is from som.inp's `control` namelist)
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    INIT_M[AG] - generate initial magnetization configuration (grain structure should have been created first!)
+    INIT_T[ENSOR] - generate and write or read magnetostatic tensor (not typically needed since LLG will do this when it is needed)
+
+  keywords for dealing w/ plotting:
+
+    PLOT HK - plot Hk histograms
+    PLOT TEMP - plot temperature contour
+    PLOT GR[AIN] - plot grain area histogram
+    PLOT HX - plot exchange histogram and contour
+    PLOT HX_IL - plot exchange histogram and contour
+    PLOT M[AG] - plot magnetization contour projected along nominal Hk direction
+    PLOT MH - plot/print m(h) curve
+       second token is the field magnitude (w/ sign)
+    PLOT HAMR - plot temperature dependences for HAMR
+    PLOT AL[L] - same as doing PLOT TEMP, PLOT HK, PLOT GRAIN, PLOT HX PLOT MAG & PLOT HAMR
+    PLOT - turn graphics on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_TEMP - turn plotting of temperature contours on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_HK - turn plotting of Hk histograms on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_GR[AIN] - turn plotting of grain area histogram on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_FL[D] - turn plotting of applied field on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       optional third token for field component: 1- x; 2- y; 3-z; 0- all components. default is 3
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_HX - turn plotting of intralayer exchange field histogram/contour on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_HX_IL - turn plotting of interlayer exchange field histogram/contour on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_MA[G] - turn plotting of magnetization along nominal Hk direction contour on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       optional third token is the number of contour levels
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_MC[OMPONENT] - turn plotting of magnetization component contour on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       third token is: 1 for Mx, 2 for My, 3 for Mz, 0 for Ms and 4 for all
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_MH - turn plotting/print of m(h) on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       optional third, fourth and fifth token tell the field direction (if one is present, all must be!)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_HE[FF] - turn plotting of SW effective field control on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_SIGNED_HEFF - turn plotting of SW field with sign of Hz on/off
+       second token is either TRUE or FALSE (default from som.inp 'plot' namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    PLOT_HS[CALE] - turn plotting of scaling of write field on/off
+       second token is either TRUE or FALSE (default is set in som.inp's `plot` namelist)
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+
+  keywords to control the scale of the field contour plots:
+  these affect the plots produced by PLOT_FLD and PLOT_TEMP above.
+  Either give two numerical values for minimum and maximum, or
+  the keyword 'AUTO' to use autoscaling (default).
+    SCALE_HX    min max         ! PLOT_FLD component x
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SCALE_HY    AUTO            ! PLOT_FLD component y
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SCALE_HZ    min max         ! PLOT_FLD component z
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SCALE_HEFF  min max         ! PLOT_FLD Stoner-Wohlfarth equivalent field
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SCALE_SIGNED_HEFF min max   ! PLOT_FLD signed Stoner-Wohlfarth field
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SCALE_TEMP  AUTO            ! PLOT_TEMP
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+
+  keywords for showing data structures
+
+    SHOW_F[IELD] - show all defined applield fields 
+    SHOW_FIELD_S[ET] - show fields assigned to each magnetic layer
+    SHOW_T[EMP] - show all defined temperature profiles
+    SHOW_TEMP_S[ET] - show temperature profiles assigned to each magnetic layer
+    SHOW_D[ISTRIBUTIONS] - show user defined distribution for each magnetic layer
+    SHOW_S[CALES] - show temperature scaling for each magnetic layer
+    SHOW_L[AYERS] - show parameters for each magnetic layer
+
+  keywords for dealing w/ printing data that generates plots:
+
+    PRINT HK - print Hk histograms
+       third token is the file name
+    PRINT GR[AIN] - print grain area histogram
+       third token is the file name
+    PRINT FL[D] - print applied/SW field
+       third token is the file name
+    PRINT HX - print intralayer exchange histogram and contour
+       third token is the file name
+    PRINT HX_IL - print interlayer exchange histogram and contour
+       third token is the file name
+    PRINT M[AG] - print magnetization contour projected along nominal Hk direction
+       third token is the file name
+    PRINT AL[L] - same as doing PRINT HK, PRINT GRAIN, PRINT FLD, PRINT HX & PRINT MAG
+       third token is the file name
+    SET_LOOP_F[ILE] - set filename for mh loop data
+       second token is the name of the file
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+
+  keywords for dealing w/ LLG
+
+    LLG - do LLG solver
+    LLG_TYP[E] - set type of integrator- either LL or LLG
+      second token is 0 (old) or 1 (new)
+    LLG_MAXM - set average maximum value of normalized magnetization for LLG to stop
+      two ways to call:
+        component index (1=x, 2=y, 3=z) and component value OR
+        mx, my, mz
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_MINM - set average minimum value of normalized magnetization for LLG to stop
+      two ways to call:
+        component index (1=x, 2=y, 3=z) and component value OR
+        mx, my, mz
+      one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    SET_TIME - set the simulation time
+      second token must be the time for the simulation
+    LLG_FIX[ED_DT] - set if LLG time step is fixed
+       second token is either TRUE or FALSE
+    LLG_THE[RMAL] - set if thermal effects (stochastic fields) are on/off
+       second token is either TRUE or FALSE
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_DTF[RAC] - set fraction of gyroperiod to allow for estimating LLG 
+       second token >= 0.d0
+    LLG_GAM[MA] - set gryomagnetic frequency (rad/Oe/s)
+       second token > 0.d0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_TEM[PERATURE] - set temperature (K)
+       second token >= 0.d0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_DTMA[X] - maximum allowed LLG time step (s)
+       second token > 0.d0
+    LLG_DT - set (initial) LLG time step (s)
+       second token > 0.d0
+    LLG_ERR1 - set convergence criteria for maximum magnetization rotation in a timestep (degree)
+       second token >= 0.d0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_ERR - set convergence criteria for maximum |mxH|/Ms in a timestep
+       second token >= 0.d0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_MAXD[M] - set maximum allowed magnetization rotation in a time step (degree)
+       second token > 0.d0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_MIND[M] - set minimum allowed magnetization rotation in a time step (degree)
+       second token >= 0.d0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_TMIN - force LLG to integrate to past this simulation time (s)
+       second token is a simulation time
+    LLG_TMAX - quit LLG once it integrates to this simulation time (s)
+       second token is a simulation time
+    LLG_DELT - quit LLG once it integrates this amount of time (s)
+       second token > 0.d0
+    LLG_AL[PHA] - set Gilbert damping parameter alpha
+       second token >= 0.d0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+    LLG_TNU[MAVE] - maximum number of timesteps to average maximum torque during stochastic runs
+       second token > 0
+    LLG_FLO[ORMS] - for stochastic fields, Ms(T)/Ms(T=0K) is not allowed below this
+       second token > 0
+       one can also specify the layer this applies to (e.g. L1 for first layer) or ALL (default is ALL)
+
+  keywords for dealing w/ performance:
+
+    START_C[LOCK] - start the timing clock
+    STOP_C[LOCK] - print the time since we called START_CLOCK
+
+  keywords for cli input:
+
+    INPUT_K[EYBOARD] - start reading cli keywords from keyboard/pipe
+    INPUT_F[ILE] - start reading cli keywords from file
+       if second token is missing or equal to the last cli file name, continue reading current cli file at last read position
+       if second token is '-', read from keyboard (same as INPUT_KEYBOARD)
+       if second token is an existing file, reset current cli file to second token, open it and start parsing that file from beginning
+      if cli_file in som.inp is '-' then after any INPUT_FILE are done, code will ask for more keyboard input
+      if cli_file in som.inp is a file, after INPUT_KEYBOARD, code will continue to parse current cli_file
+
+MISC:
+
+1) specifying the placement of write fields onto simulation region:
+    by definition, the relationship between a point on the
+    simulation mesh [(x,y)_sim] and a point on a write field mesh
+    [(x,y)_writefld] is given by the algebraic expression
+
+      (x,y)_sim = (x,y)_writefld - (ref_x,ref_y) + (offset_x,offset_y) 
+                 + (vel_x,vel_y) * (t - t_origin)  (in cgs)
+
+    the simulation region has x horizontally and increasing towards the right on the screen, while y is veritical and
+     increasing towards the top of the screen (both are in the plane of the disk). the code does not understand the terms
+     'down track' or 'cross track' so neither x or y are assumed to be one or the other. the origin of the simulation mesh 
+     is at the lower left corner, so the first sub-grain is centered at the point (dx/2, dy/2).
+    for old write fields (i.e. media.f type fields (see 2 below)), their mesh is constructed by also assuming their origin
+     is also at the lower left corner and the mesh size is the same as the sub-grain size.
+    for new write fields (i.e. GM type fields), the mesh is specified in the file. an automatic translation from GM's coordinates is 
+     done at that time by converting the length from nm to cm and mapping GM's x to SOM's y, GM's y to SOM's z and GM's z to SOM's x.
+     a similar translation is done of the field components along w/ the conversion of Telsa to Oe.
+
+2) when a write field is read in, parameters associated w/ that field are initialized as follwing:
+    if the write field is of old type (i.e. media.f type field) then
+      the mesh is assumed to be the same as the sub-grain mesh, with the origin placed at the lower left corner
+      ref_x and ref_y are set equal to the values specified in the file multiplied by dx and dy, respectively
+    otherwise the write field is of new type (i.e. GM type field) then
+      ref_x and ref_y are set to 0.0 unless this write field index was used previously, then ref_x and ref_y retain their current values
+
+    if this write field index has not been used previously then
+      offset_x = dx * nx * 0.5, offset_y = dy * ny * 0.5 (i.e. in the center of the simulation region)
+      t_origin = vel_x = vel_y = 0.0
+    otherwise these values retain their current values
+
+   if a write field is generated by duplication, then the new write field aquires all of the attributes of the original,
+     that is offset_x, offset_y, t_origin, ref_x, ref_y, vel_x, vel_y, mesh and fields are copied to the new write field
+
+3) algorithm for placement of temperature profiles are similar (identical) to write field placement
+
+
+SOURCE FILES:
+   som consists of the following source files:
+
+    app_fld.f90   - routine to read/interpolate write fields onto simulation grid
+    app_temp.f90  - routine to read/interpolate thermal profiles onto simulation grid
+    cli.f90       - cli parser
+    grain.f90     - routine to create/read/write grain microstructure
+    input.f90     - routine to read/create som.inp and/or som.cli and to parse magin.med
+    io.f90        - routine to deal w/ screen output & reading GM file comments
+    llg.f90       - LLG routine
+    mag.f90       - routine to initialize/read/write magnetization state
+    main.f90      - main code
+    misc.f90      - misc. routine for random number generators, coordinate transforms and magnetostatic tensor element calculation
+    plot.f90      - routine to generate, plot and print graphic windows
+    structure.f90 - defines/initializes main data structure 
+    tensor.f90    - routine to generate/read/write magnetostatic tensor
+    demag.f90     - generic routine to compute magnetostatic field with either fftpack or fftw- should NOT be used
+    fftpack/demag.f90 - routine to compute magnetostatic field using fftpack
+    fftpack/fft.f90   - fftpack routines and drivers
+    fftw/demag.f90    - routine to compute magnetostatic field using fftw
+    fftw/fft.f90      - fft drivers for fftw
+    linux/grafix.f90  - routine which creates/updates and draws graphics windows for linux/Mac OS X (i.e. X11 windows)
+    win/grafix.f90    - routine which creates/updates and draws graphics windows for win32 (i.e. uses compaq's fortran drawing primiatives)
+
+eof

@@ -1,0 +1,50 @@
+#!/bin/bash
+
+if [ ! -n "$5" ]; then
+	echo "USEAGE: $(basename $0) <version of plplot> FC CC CXX intel|gnu"
+        exit 1
+fi
+
+cd $(dirname $0)
+
+#plplot tar ball
+#PLPV="5.15.0"
+
+#intel
+export FC="${2} -O2"
+export CC="${3} -O2"
+export CXX="${4} -O2"
+
+CMAKE=cmake && (( $(cmake --version|head -1|awk '{print $NF}' | awk -F. '{print $1}') < 3 )) && CMAKE=cmake3
+
+echo "using:"
+echo "  $FC"
+echo "  $CC"
+echo "  $CXX"
+echo "  $CMAKE"
+PREFIX="${PWD}/../${5}"
+echo "  PREFIX=${PREFIX}"
+
+#GZF=plplot-5.15.0.tar.gz
+GZF=plplot-${1}.tar.gz
+GZFURL="https://sourceforge.net/projects/plplot/files/plplot/${1}%20Source/${GZF}/download"
+[ ! -f "$GZF" ] && curl -L $GZFURL > $GZF
+
+tar -xzf $GZF || exit 1
+j=`echo $GZF|sed "s/.tar.gz//"`
+cd $j
+mkdir build; cd build
+
+$CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} -DBUILD_TEST=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+	-DENABLE_DYNDRIVERS=OFF -DENABLE_ada=OFF -DENABLE_d=OFF -DENABLE_qt=OFF -DENABLE_lua=OFF -DENABLE_tk=OFF \
+	-DENABLE_python=OFF -DENABLE_tcl=OFF -DPLD_xcairo=OFF -DENABLE_cxx=OFF -DENABLE_fortran=ON -DDEFAULT_NO_DEVICES=ON \
+	-DENABLE_DYNDRIVERS=OFF -DPLD_xwin=ON -DPL_HAVE_QHULL=OFF -DENABLE_java=OFF \
+	-DPL_HAVE_PTHREAD=ON .. > >(tee -a ../../plplot.log) 2> >(tee -a ../../plplot.err >&2) && \
+	make > >(tee -a ../../plplot.log) 2> >(tee -a ../../plplot.err >&2) && \
+	make install > >(tee -a ../../plplot.log) 2> >(tee -a ../../plplot.err >&2)
+cd ../.. && rm -rf $j
+
+rm -rf ${PREFIX}/share/plplot${1}/examples
+
+#https://sourceforge.net/p/plplot/wiki/CMake_options_for_PLplot/
+

@@ -1,0 +1,89 @@
+#!/bin/bash
+
+if [ ! -n "$4" ]; then
+	echo "USEAGE: $(basename $0) <fftw.tar.gz> FC CC INSTALL_DIR [ native|avx|avx2|avx512 ]"
+	echo "  default: $(basename $0) <fftw.tar.gz> ifort icc INSTALL_DIR native"
+	exit 1
+fi
+
+cd $(dirname $0)
+
+#intel
+COPT="F77=${2} CC=${3}"
+
+OPTS="--disable-doc --enable-single"
+OPTD="--disable-doc"
+
+#which avx (if any) to compile against
+avx="native"
+if [ -n "$5" ]; then
+	avx="$5"
+fi
+
+#get the tar ball
+echo "using:"
+echo "  fftw_tarball=$1"
+echo "  COPT=$COPT"
+echo "  OPTS=$OPTS"
+echo "  OPTD=$OPTD"
+echo "  avx=$avx"
+PREFIX="${PWD}/../${4}"
+echo "  PREFIX=${PREFIX}"
+
+[ ! -f "$1" ] && curl -o $1 http://www.fftw.org/$1
+
+tar -xzf $1 || exit 1
+j0=`echo $1|sed "s/.tar.gz//"`
+cd $j0
+
+#loop over avx
+for i in $avx; do i0="" && j=""
+	if [ "$i" == "avx" ]; then j=" --enable-avx" && i0="_$i"
+	elif [ "$i" == "avx2" ]; then j=" --enable-avx2" && i0="_$i"
+#	elif [ "$i" == "avx512" ]; then j=" --enable-avx2 --enable-avx512" && i0="_$i"
+	elif [ "$i" == "avx512" ]; then j=" --enable-avx512" && i0="_$i"
+	elif [ "$i" == "native" ]; then
+		if [[ $(uname) == "Darwin" ]]; then  #macOS avx options if intel
+			[ $(sysctl machdep.cpu.features | grep -ic avx) -gt 0 ] && j=" --enable-avx" && \
+				[ $(sysctl machdep.cpu.features | grep -ic avx2) -gt 0 ] && j=" --enable-avx2" && \
+				[ $(sysctl machdep.cpu.features | grep -ic avx512) -gt 0 ] && j=" --enable-avx512"
+		else	#non macOS av options if intel
+			[ $(lscpu | grep -c avx) -gt 0 ] && j=" --enable-avx" && \
+				[ $(lscpu | grep -c avx2) -gt 0 ] && j=" --enable-avx2" && \
+				[ $(lscpu | grep -c avx512) -gt 0 ] && j=" --enable-avx512"
+		fi
+	fi
+
+	unset docheck
+	if [ "$i" == "native" ]; then
+		docheck=1
+	elif [[ $(uname) == "Darwin" ]]; then
+		(( $(sysctl machdep.cpu.features|grep -ic $i) > 0 )) && docheck=1
+	else
+		(( $(lscpu|grep -c $i) > 0 )) && docheck=1
+	fi
+
+	if [ -n "$docheck" ]; then  #do a check if hardware supports the extension, otherwise punt on the check
+		echo "./configure --prefix=${PREFIX}${i0} ${OPTS}${j} ${COPT} && make -j4 && make -j4 check && make install && make distclean && ./configure --prefix=${PREFIX}${i0} ${OPTD}${j} ${COPT} && make -j4 && make -j4 check && make install" | tee -a ../fftw.log
+		./configure --prefix=${PREFIX}${i0} ${OPTS}${j} ${COPT}  > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make -j4 > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make -j4 check > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make install > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && make distclean && \
+			./configure --prefix=${PREFIX}${i0} ${OPTD}${j} ${COPT} > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make -j4 > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make -j4 check > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make install > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2)
+	else
+		echo "./configure --prefix=${PREFIX}${i0} ${OPTS}${j} ${COPT} && make -j4 && make install && make distclean && ./configure --prefix=${PREFIX}${i0} ${OPTD}${j} ${COPT} && make -j4 && make install" | tee -a ../fftw.log
+		./configure --prefix=${PREFIX}${i0} ${OPTS}${j} ${COPT} > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make -j4 > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make install > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && make distclean && \
+			./configure --prefix=${PREFIX}${i0} ${OPTD}${j} ${COPT} > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make -j4 > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2) && \
+			make install > >(tee -a ../fftw.log) 2> >(tee -a ../fftw.err >&2)
+	fi
+	make distclean
+done
+cd .. && rm -rf $j0
+exit 0
+

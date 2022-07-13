@@ -1,0 +1,7 @@
+WP*
+test
+.build
+.mrm
+.*.swp
+*~
+*.tar.gz
